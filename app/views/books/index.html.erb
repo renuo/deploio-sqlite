@@ -1,0 +1,17 @@
+<h1>Books</h1>
+
+<div id="books">
+  <% @books.each do |book| %>
+    <div id="<%= dom_id(book) %>">
+      <p><strong>Title:</strong> <%= book.title %></p>
+      <p>
+        <%= link_to "Show", book %> |
+        <%= link_to "Edit", edit_book_path(book) %> |
+        <%= link_to "Destroy", book, method: :delete, data: { turbo_method: :delete, turbo_confirm: "Are you sure?" } %>
+      </p>
+    </div>
+    <hr>
+  <% end %>
+</div>
+
+<%= link_to "New book", new_book_path %>
