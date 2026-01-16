@@ -1,8 +1,14 @@
 class BooksController < ApplicationController
+  skip_forgery_protection
+
   before_action :set_book, only: %i[show edit update destroy]
 
   def index
     @books = Book.all
+    respond_to do |format|
+      format.html
+      format.json { render json: @books }
+    end
   end
 
   def show
@@ -19,9 +25,15 @@ class BooksController < ApplicationController
     @book = Book.new(book_params)
 
     if @book.save
-      redirect_to @book, notice: "Book was successfully created."
+      respond_to do |format|
+        format.html { redirect_to @book, notice: "Book was successfully created." }
+        format.json { render json: @book, status: :created }
+      end
     else
-      render :new, status: :unprocessable_entity
+      respond_to do |format|
+        format.html { render :new, status: :unprocessable_entity }
+        format.json { render json: @book.errors, status: :unprocessable_entity }
+      end
     end
   end
 
