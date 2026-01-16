@@ -1,0 +1,60 @@
+#!/bin/bash -e
+
+# Litestream restore and replicate for SQLite persistence
+# Only runs when LITESTREAM_S3_BUCKET is configured
+
+restore_db() {
+  local db_path=$1
+  local db_name=$(basename "$db_path")
+
+  echo "=== Restoring $db_name ==="
+
+  # If LITESTREAM_RESTORE_TIMESTAMP is set, use it to restore to a specific point
+  # This is useful to recover from corrupted/empty generations
+  if [ -n "$LITESTREAM_RESTORE_TIMESTAMP" ]; then
+    echo "Using timestamp: $LITESTREAM_RESTORE_TIMESTAMP"
+    litestream restore -if-replica-exists -config /etc/litestream.yml -timestamp "$LITESTREAM_RESTORE_TIMESTAMP" "$db_path" 2>&1 || echo "No replica found for $db_name"
+  else
+    litestream restore -if-replica-exists -config /etc/litestream.yml "$db_path" 2>&1 || echo "No replica found for $db_name"
+  fi
+}
+
+if [ -n "$LITESTREAM_S3_BUCKET" ]; then
+  echo "=== Litestream: Starting restore process ==="
+  echo "S3 Bucket: $LITESTREAM_S3_BUCKET"
+  echo "S3 Endpoint: $LITESTREAM_S3_ENDPOINT"
+
+  # Remove any existing databases so restore will work
+  echo "=== Removing any existing local databases ==="
+  rm -f /rails/storage/production.sqlite3* /rails/storage/production_cache.sqlite3* \
+        /rails/storage/production_queue.sqlite3* /rails/storage/production_cable.sqlite3*
+
+  # Restore all databases
+  restore_db /rails/storage/production.sqlite3
+  restore_db /rails/storage/production_cache.sqlite3
+  restore_db /rails/storage/production_queue.sqlite3
+  restore_db /rails/storage/production_cable.sqlite3
+
+  # Check if restoration resulted in data
+  echo "=== After restore - checking files ==="
+  ls -la /rails/storage/ 2>/dev/null || echo "Storage directory empty"
+
+  if [ -f /rails/storage/production.sqlite3 ]; then
+    BOOK_COUNT=$(sqlite3 /rails/storage/production.sqlite3 "SELECT COUNT(*) FROM books;" 2>/dev/null || echo "0")
+    echo "Books in restored database: $BOOK_COUNT"
+  fi
+
+  echo "Litestream: Restore complete. Running migrations..."
+
+  # Run database migrations
+  ./bin/rails db:prepare
+
+  echo "Litestream: Starting replication and app..."
+
+  # Use litestream replicate to run the app - it handles replication and runs the app
+  exec litestream replicate -config /etc/litestream.yml -exec "./bin/thrust ./bin/rails server"
+else
+  echo "Litestream: S3 not configured, starting app without replication"
+  ./bin/rails db:prepare
+  exec ./bin/thrust ./bin/rails server
+fi

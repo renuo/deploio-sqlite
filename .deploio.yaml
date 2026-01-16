@@ -1,0 +1,5 @@
+deployJob:
+  name: db-migrate
+  command: bin/rails db:migrate
+  retries: 0
+  timeout: 10m

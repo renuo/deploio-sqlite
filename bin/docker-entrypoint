@@ -1,0 +1,44 @@
+#!/bin/bash -e
+
+# Litestream restore and replicate for SQLite persistence
+# Only runs when LITESTREAM_S3_BUCKET is configured
+
+if [ -n "$LITESTREAM_S3_BUCKET" ]; then
+  echo "Litestream: Restoring databases from S3..."
+
+  # Remove any existing databases so restore will work
+  # (deploy job may have created empty ones)
+  rm -f /rails/storage/production.sqlite3* /rails/storage/production_cache.sqlite3* \
+        /rails/storage/production_queue.sqlite3* /rails/storage/production_cable.sqlite3*
+
+  # Restore each database if a replica exists in S3
+  echo "Restoring production.sqlite3..."
+  litestream restore -v -if-replica-exists -config /etc/litestream.yml /rails/storage/production.sqlite3 2>&1 || echo "No replica found for production.sqlite3"
+
+  echo "Restoring production_cache.sqlite3..."
+  litestream restore -v -if-replica-exists -config /etc/litestream.yml /rails/storage/production_cache.sqlite3 2>&1 || echo "No replica found for production_cache.sqlite3"
+
+  echo "Restoring production_queue.sqlite3..."
+  litestream restore -v -if-replica-exists -config /etc/litestream.yml /rails/storage/production_queue.sqlite3 2>&1 || echo "No replica found for production_queue.sqlite3"
+
+  echo "Restoring production_cable.sqlite3..."
+  litestream restore -v -if-replica-exists -config /etc/litestream.yml /rails/storage/production_cable.sqlite3 2>&1 || echo "No replica found for production_cable.sqlite3"
+
+  echo "Litestream: Restore complete. Starting replication..."
+
+  # Start Litestream replication in the background
+  litestream replicate -config /etc/litestream.yml &
+  LITESTREAM_PID=$!
+
+  # Trap to ensure Litestream stops gracefully on container shutdown
+  trap "kill $LITESTREAM_PID 2>/dev/null" EXIT
+else
+  echo "Litestream: S3 not configured, skipping restore and replication"
+fi
+
+# If running the rails server then create or migrate existing database
+if [ "${@: -2:1}" == "./bin/rails" ] && [ "${@: -1:1}" == "server" ]; then
+  ./bin/rails db:prepare
+fi
+
+exec "${@}"
